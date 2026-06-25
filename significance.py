@@ -131,13 +131,22 @@ def compute_snr(
     if n_in < 3:
         logger.warning("Only %d in-transit cadences — SNR unreliable.", n_in)
 
-    # sigma_oot: per-point RMS scatter out of transit
-    sigma_oot = float(np.std(oot_flux, ddof=1))
+    # sigma_oot: per-point robust scatter out of transit.
+    # Part B7: use robust estimator (1.4826 * MAD) rather than std, which
+    # is inflated by any residual outliers in the out-of-transit baseline.
+    oot_median = np.median(oot_flux)
+    mad = np.median(np.abs(oot_flux - oot_median))
+    sigma_oot = float(1.4826 * mad)   # consistent sigma for Gaussian noise
+
+    # Fallback to std if MAD is zero (pathological, e.g., flat synthetic data)
+    if sigma_oot == 0.0:
+        sigma_oot = float(np.std(oot_flux, ddof=1))
+        logger.debug("MAD=0 for OOT flux; falling back to std.")
 
     # noise on the transit box depth = sigma_oot / sqrt(N_in)
     noise_on_transit = sigma_oot / np.sqrt(max(n_in, 1))
 
-    # SNR = depth / noise_on_transit  (Kovacs et al. 2002 box formula)
+    # SNR = depth / noise_on_transit  (Kovacs et al. 2002 / Part B7 formula)
     snr = float(depth / noise_on_transit) if noise_on_transit > 0 else np.nan
 
     result = {
@@ -269,10 +278,22 @@ def compute_fap_bootstrap(
         "Bootstrap FAP: %d trials, real_power=%.4f …", n_trials, real_power
     )
 
+    if n_trials < 1000:
+        logger.warning(
+            "n_trials=%d < 1000 — FAP estimate is itself unreliable. "
+            "Per Part B7: N_bootstrap >> 1/FAP is required for a stable estimate. "
+            "Increase n_trials to ≥1000 (5000–10000 for FAP claims < 0.001).",
+            n_trials,
+        )
+
     for i in range(n_trials):
-        shuffled_flux = rng.permutation(flux)
+        # Part B7: use circular shift (not naive permutation) to preserve
+        # autocorrelation / red-noise structure.  A naive shuffle destroys
+        # all correlated noise, giving an over-optimistic FAP for red noise.
+        shift = rng.integers(1, len(flux))          # random shift amount
+        shifted_flux = np.roll(flux, shift)          # circular roll
         p = _run_bls_single(
-            time, shuffled_flux,
+            time, shifted_flux,
             period_min=period_min,
             period_max_frac=period_max_frac,
             n_periods=n_periods,

@@ -159,30 +159,49 @@ def test_odd_even(
     even_depth_ppm = (1.0 - np.median(even_flux)) * 1e6
     depth_diff_ppm = abs(odd_depth_ppm - even_depth_ppm)
 
-    # Welch t-test: H0 = odd and even depths are drawn from same distribution
+    # Part B6 exact formula:
+    #   depth_odd_err  = MAD-based uncertainty on the per-transit median depth
+    #   depth_even_err = same for even group
+    #   delta          = depth_odd - depth_even
+    #   sigma_delta    = sqrt(depth_odd_err^2 + depth_even_err^2)
+    #   flag if |delta| / sigma_delta > 3   (3-sigma threshold)
+    def _depth_err_ppm(in_flux_group):
+        """Robust uncertainty on the median depth estimate [ppm]."""
+        mad = np.median(np.abs(in_flux_group - np.median(in_flux_group)))
+        sigma = 1.4826 * mad / np.sqrt(len(in_flux_group))  # uncertainty on median
+        return sigma * 1e6  # convert to ppm
+
+    depth_odd_err  = _depth_err_ppm(odd_flux)
+    depth_even_err = _depth_err_ppm(even_flux)
+    sigma_delta = np.sqrt(depth_odd_err**2 + depth_even_err**2)
+    delta = odd_depth_ppm - even_depth_ppm
+    depth_diff_sigma = abs(delta) / max(sigma_delta, 1e-3)   # |delta|/sigma_delta
+
+    # Welch t-test: kept as cross-check (H0 = same distribution)
     _, p_value = ttest_ind(odd_flux, even_flux, equal_var=False)
 
-    # Fractional depth asymmetry
+    # Fractional depth asymmetry (legacy diagnostic, not the primary criterion)
     mean_depth_ppm = (odd_depth_ppm + even_depth_ppm) / 2.0
     asymmetry = depth_diff_ppm / max(mean_depth_ppm, 1.0)
 
-    # Score: pass if asymmetry < 20% and p-value > 0.01 (not significantly different)
-    if asymmetry < 0.20 and p_value > 0.01:
-        score, verdict = +1, "PASS — odd/even depths consistent (planet-like)"
-    elif asymmetry > 0.50 or p_value < 0.001:
-        score, verdict = -1, "FAIL — significant odd/even depth asymmetry (EB-like)"
+    # Score: use Part B6 primary criterion |delta|/sigma_delta > 3
+    if depth_diff_sigma < 3.0:
+        score, verdict = +1, "PASS — odd/even depths consistent (planet-like, |Δ|/σ=%.2f<3)" % depth_diff_sigma
+    elif depth_diff_sigma >= 3.0:
+        score, verdict = -1, "FAIL — significant odd/even depth asymmetry (EB-like, |Δ|/σ=%.2f≥3)" % depth_diff_sigma
     else:
-        score, verdict = 0, "INCONCLUSIVE — mild asymmetry, warrants follow-up"
+        score, verdict = 0, "INCONCLUSIVE — mild asymmetry (|Δ|/σ=%.2f)" % depth_diff_sigma
 
     logger.info(
-        "Odd-even test: odd=%.1f ppm, even=%.1f ppm, diff=%.1f ppm, "
-        "asymmetry=%.2f, p=%.4f → %s",
-        odd_depth_ppm, even_depth_ppm, depth_diff_ppm, asymmetry, p_value, verdict,
+        "Odd-even test (Part B6): odd=%.1f ppm, even=%.1f ppm, "
+        "|delta|/sigma_delta=%.2f (threshold 3), p=%.4f → %s",
+        odd_depth_ppm, even_depth_ppm, depth_diff_sigma, p_value, verdict,
     )
     return {
         "score": score, "verdict": verdict,
         "odd_depth_ppm": odd_depth_ppm, "even_depth_ppm": even_depth_ppm,
         "depth_diff_ppm": depth_diff_ppm, "asymmetry": asymmetry,
+        "depth_diff_sigma": float(depth_diff_sigma),   # Part B6 primary metric
         "p_value": float(p_value),
     }
 

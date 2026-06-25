@@ -220,8 +220,12 @@ def _build_lmfit_params(bp: TransitParams) -> Parameters:
         Parameters with bounds and initial values.
     """
     p = Parameters()
-    # t0: allow ±half-period drift from BLS epoch
-    p.add("t0",   value=bp.t0,  min=bp.t0 - bp.per * 0.5, max=bp.t0 + bp.per * 0.5)
+    # t0: allow the transit centre to float within ±half-duration from phase=0
+    # (phase=0 corresponds to t=0 in the phase-folded frame).
+    # Wide bounds (±per/2) risk the optimizer wandering; narrow to ±2*duration
+    # so the fit can correct BLS epoch imprecision without losing the transit.
+    half_dur_search = min(bp.per * 0.5, max(bp.per * 0.1, 2.0 * bp.per / (np.pi * bp.a)))
+    p.add("t0",   value=0.0,  min=-half_dur_search, max=+half_dur_search)
     p.add("per",  value=bp.per, min=bp.per * 0.95, max=bp.per * 1.05, vary=False)
     # Rp/Rs: strictly positive, < 0.5 (would be a grazing giant planet otherwise)
     p.add("rp",   value=bp.rp,  min=1e-5,  max=0.5)
@@ -273,7 +277,11 @@ def _transit_residual(
     v = lmfit_params.valuesdict()
 
     bp = TransitParams()
-    bp.t0 = 0.0           # phase-folded: transit centred at phase=0 → t=0
+    # Part B5 fix: use the *fitted* t0 from lmfit, not hardcoded 0.0.
+    # The BLS epoch may be slightly off from the true transit centre;
+    # locking t0=0.0 prevents the optimizer from correcting this offset,
+    # causing convergence to a flat (depth=0) solution.
+    bp.t0 = v["t0"]        # in [days], relative to phase=0 (which corresponds to t=0)
     bp.per = period
     bp.rp = v["rp"]
     bp.a = v["a_rs"]
@@ -285,7 +293,7 @@ def _transit_residual(
 
     # 'time' here is actually the phase array scaled to time units
     # (phase * period = elapsed time since mid-transit)
-    t_abs = time * period   # [days], centred at 0
+    t_abs = time * period   # [days], centred at 0 corresponds to phase=0
 
     model_obj = make_batman_model(bp, t_abs)
     model_flux = eval_model(model_obj, bp) * v["baseline"]
@@ -385,6 +393,40 @@ def fit_transit_lmfit(
     u2_val, u2_err = _get("u2")
     bl_val, bl_err = _get("baseline")
 
+    # --- Covariance fallback (Part B5 fix) ---
+    # lmfit returns stderr=None when the Jacobian is singular or near-zero
+    # (e.g., when rp approaches a bound, or the fitted value is very close
+    # to the initial guess).  In this case, estimate rp_err from the residual
+    # scatter using the matched-filter propagation formula:
+    #
+    #   sigma_depth ≈ sigma_oot / sqrt(N_in)
+    #   sigma_rp    ≈ sigma_depth / (2 * rp)
+    #
+    # This is a lower bound on the true uncertainty (assumes perfect model shape).
+    if np.isnan(rp_err) and rp_val > 1e-4:
+        residuals = _transit_residual(result.params, ph_fit, fl_fit, fe_fit,
+                                      init_params.per, init_params.t0)
+        sigma_residual = float(np.std(residuals * fe_fit, ddof=1))   # per-point scatter
+
+        # Identify in-transit points (|phase| < half-duration in phase units)
+        dur_in_phase = a_val and (1.0 / (np.pi * a_val)) or 0.05
+        in_transit_mask = np.abs(ph_fit) < max(dur_in_phase * 1.5, 0.02)
+        N_in = max(int(in_transit_mask.sum()), 1)
+
+        sigma_oot = sigma_residual
+        sigma_depth = sigma_oot / np.sqrt(N_in)
+        rp_err = sigma_depth / max(2.0 * rp_val, 1e-6)  # sigma_rp from sigma_depth
+        logger.info(
+            "Covariance fallback: estimated rp_err=%.6f from residuals "
+            "(sigma_oot=%.2e, N_in=%d).",
+            rp_err, sigma_oot, N_in,
+        )
+    elif np.isnan(rp_err):
+        logger.warning(
+            "lmfit covariance unavailable for rp — fit may be degenerate. "
+            "Try narrowing parameter bounds or using more data."
+        )
+
     # Depth = (Rp/Rs)^2; error propagated: sigma_depth = 2*Rp/Rs * sigma_Rp/Rs
     depth_val = rp_val ** 2
     depth_err = 2.0 * rp_val * rp_err if not np.isnan(rp_err) else np.nan
@@ -425,11 +467,6 @@ def fit_transit_lmfit(
         "batman_available": BATMAN_AVAILABLE,
     }
 
-    if np.isnan(rp_err):
-        logger.warning(
-            "lmfit covariance unavailable for rp — fit may be degenerate. "
-            "Try narrowing parameter bounds or using more data."
-        )
 
     logger.info(
         "Fit complete: depth=%.1f±%.1f ppm, duration=%.3f h, "
@@ -647,7 +684,7 @@ def compute_model_curve(
 
     v = fit_result.params.valuesdict()
     bp = TransitParams()
-    bp.t0 = 0.0
+    bp.t0 = v.get("t0", 0.0)  # use fitted t0 (Part B5 fix: was hardcoded 0.0)
     bp.per = init_params.per
     bp.rp = v["rp"]
     bp.a = v["a_rs"]

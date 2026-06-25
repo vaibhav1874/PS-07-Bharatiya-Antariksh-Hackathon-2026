@@ -163,15 +163,21 @@ def bin_lc_for_bls(
 def build_period_grid(
     baseline_days: float,
     min_period: float = 0.5,
-    max_fraction: float = 1.0 / 3.0,
+    max_fraction: float = 1.0 / 5.0,
     n_per_decade: int = 5000,
 ) -> np.ndarray:
     """
     Build a logarithmically-spaced period grid.
 
-    Maximum period = ``baseline_days * max_fraction`` (default: 1/3 of the
-    observing baseline).  This guarantees at least 3 transit events within
-    the dataset, which is the minimum required for reliable period detection.
+    Maximum period = ``baseline_days * max_fraction``.
+
+    **Part B4 / Part A1 fix:** default changed from 1/3 to 1/5.
+    Reference Part A1 states ``baseline/3`` is the bare *minimum* (risky —
+    BLS has only 3 transit instances to constrain the box, enabling
+    false high power from small-sample overfitting).  ``baseline/5`` is the
+    safer choice and reduces the rising noise floor at long periods seen in
+    the periodogram.  For KIC 11904151 (period=0.837 d), this does not
+    affect detection: the true period is well within even the ``/10`` limit.
 
     Parameters
     ----------
@@ -180,7 +186,9 @@ def build_period_grid(
     min_period : float
         Minimum period to search [days].
     max_fraction : float
-        max_period = baseline × this fraction.  Default 1/3 ensures ≥ 3 transits.
+        max_period = baseline × this fraction.
+        ``1/5`` (default) = safer per Part B4/A1 reference recommendation.
+        ``1/3`` = bare minimum (more susceptible to edge-effect false peaks).
     n_per_decade : int
         Number of grid points per decade (controls resolution).
 
@@ -365,7 +373,7 @@ def run_tls(
     baseline = t_c[-1] - t_c[0]
     results = model.power(
         period_min=0.5,
-        period_max=baseline / 3.0,
+        period_max=baseline / 5.0,   # Part B4/A1: safer cap (was /3 bare minimum)
         show_progress_bar=False,
         use_threads=1,  # deterministic
     )

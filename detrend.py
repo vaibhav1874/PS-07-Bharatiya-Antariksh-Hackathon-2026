@@ -148,42 +148,96 @@ def detrend_savgol(
     flux: np.ndarray,
     window_length: int,
     polyorder: int = 2,
+    gap_threshold_days: float = 0.5,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Detrend using a Savitzky-Golay polynomial smoothing filter.
 
-    Fast and effective for smooth systematics.  Less robust than biweight
-    for light curves with rapid stellar variability or large starspot features.
+    **Gap-aware (Part B3 fix)**: ``scipy.signal.savgol_filter`` operates on
+    array index, not on time value — it silently assumes uniform sampling.
+    Real Kepler light curves have multi-day gaps between quarters.  When the
+    filter slides its window across a gap it treats index-adjacent points
+    (actually days apart) as time-adjacent, producing a flat/boxy trend
+    estimate at and after the gap boundary.
+
+    Fix: split the light curve into contiguous segments at gaps larger than
+    ``gap_threshold_days`` (Part B3 specifies 0.5 d) and apply the filter
+    independently to each segment.
+
+    Segments shorter than ``window_length`` are skipped (their trend is set
+    to 1.0, i.e., no detrending applied to that short stub).
+
+    Note on arithmetic form: the reference (Part B3) shows the additive form
+    ``flux - savgol + 1.0``; we use the multiplicative form ``flux / trend``
+    which is equivalent for normalised flux and is more physically correct for
+    fractional (ppm-level) stellar variability.  This deviation is explicit.
 
     Parameters
     ----------
     time : np.ndarray
-        Time array [days].  Not used by savgol_filter directly, but retained
-        for API consistency.
+        Time array [days].  Used to locate inter-segment gaps.
     flux : np.ndarray
         Raw pre-cleaned flux array.
     window_length : int
         Number of cadence points in the smoothing window (must be odd).
     polyorder : int
         Polynomial order for the SG filter (2 = quadratic is standard).
+    gap_threshold_days : float
+        Time gaps larger than this value [days] split the light curve into
+        separate segments.  Default: 0.5 d (matches Part B3 specification).
 
     Returns
     -------
     trend : np.ndarray
-        Smoothed trend estimate.
+        Smoothed trend estimate (per-segment SG, 1.0 for skipped segments).
     detrended : np.ndarray
         Normalised detrended flux = flux / trend  (median ≈ 1.0).
     """
-    # Hippke et al. 2019 §3.1: window ≥ 3 × transit duration avoids
-    # self-subtraction; polyorder=2 is the standard choice for SG detrending
     if window_length >= len(flux):
         raise ValueError(
             f"window_length ({window_length}) must be < len(flux) ({len(flux)})."
         )
-    trend = savgol_filter(flux, window_length=window_length, polyorder=polyorder)
+
+    # --- Part B3: gap-segmentation fix ---
+    # Find indices where consecutive time stamps differ by > gap_threshold_days
+    gap_indices = np.where(np.diff(time) > gap_threshold_days)[0]
+    # np.split on indices i means segments end at i and start at i+1
+    seg_indices = np.split(np.arange(len(time)), gap_indices + 1)
+
+    logger.info(
+        "SG detrend: found %d gap(s) > %.2f days → %d contiguous segment(s).",
+        len(gap_indices), gap_threshold_days, len(seg_indices),
+    )
+
+    trend = np.ones_like(flux)   # default: trend = 1.0 (no detrending)
+    n_skipped = 0
+
+    for seg in seg_indices:
+        if len(seg) < window_length:
+            # Segment too short to apply SG filter reliably — skip it.
+            # Trend stays 1.0 for this segment (detrended = flux / 1.0 = flux).
+            logger.debug(
+                "Segment of %d points < window %d — skipping (trend=1.0).",
+                len(seg), window_length,
+            )
+            n_skipped += 1
+            continue
+        trend[seg] = savgol_filter(
+            flux[seg], window_length=window_length, polyorder=polyorder
+        )
+
+    if n_skipped:
+        logger.warning(
+            "%d segment(s) were shorter than window_length=%d and were NOT detrended.",
+            n_skipped, window_length,
+        )
+
     detrended = flux / trend
-    logger.info("SG detrending complete (window=%d, polyorder=%d).",
-                window_length, polyorder)
+    logger.info(
+        "SG detrending complete: %d segments, window=%d pts, polyorder=%d, "
+        "%d segment(s) skipped (too short).",
+        len(seg_indices), window_length, polyorder, n_skipped,
+    )
     return trend, detrended
 
 

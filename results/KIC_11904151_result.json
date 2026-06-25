@@ -1,0 +1,38 @@
+{
+  "target_id": "KIC 11904151",
+  "mission": "Kepler",
+  "period_days": 0.837531,
+  "period_uncertainty": NaN,
+  "depth_pct": 0.0039,
+  "depth_uncertainty_pct": NaN,
+  "duration_hours": 0.96,
+  "duration_uncertainty_hours": NaN,
+  "snr": 35.545,
+  "false_alarm_probability": NaN,
+  "vetting": {
+    "odd_even_consistent": false,
+    "secondary_eclipse_detected": false,
+    "centroid_shift_detected": false
+  },
+  "vetting_score": 0,
+  "vetting_verdict": "unknown",
+  "classification": "eclipsing_binary_or_false_positive",
+  "classification_confidence": 0.5162,
+  "class_probabilities": {
+    "AFP": 0.5162,
+    "NTP": 0.1587,
+    "PC": 0.3251
+  },
+  "pipeline_wall_time_s": 638.2,
+  "known_value_comparison": {
+    "published_period_d": 0.8375243,
+    "recovered_period_d": 0.837531,
+    "period_error_pct": 0.0,
+    "published_depth_ppm": 1470.0,
+    "recovered_depth_ppm": 38.6,
+    "depth_error_pct": 97.37,
+    "published_duration_h": 1.811,
+    "recovered_duration_h": 0.96,
+    "duration_error_pct": 46.99
+  }
+}
