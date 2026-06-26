@@ -440,8 +440,7 @@ def fit_transit_lmfit(
     numerator_sq = max((1.0 + rp_val) ** 2 - b_val ** 2, 0.0)
     sin_half = np.sqrt(numerator_sq) / a_val
     sin_half = np.clip(sin_half, -1.0, 1.0)
-    duration_val = (init_params.per / np.pi) * np.arcsin(sin_half)   # days
-    duration_err = np.nan   # propagated from a_rs/inc uncertainties — complex, skip here
+    duration_val = (init_params.per / np.pi) * np.arcsin(sin_half)
 
     # Ingress/egress time (Seager & Malléen-Ornelas 2003):
     # T_in = (P/2pi) * [arcsin(sqrt((1+k)^2 - b^2)/a) - arcsin(sqrt((1-k)^2 - b^2)/a)]
@@ -462,7 +461,9 @@ def fit_transit_lmfit(
         "depth_ppm_val": depth_val * 1e6,
         "depth_ppm_err": depth_err * 1e6 if not np.isnan(depth_err) else np.nan,
         "duration_h_val": duration_val * 24.0,
-        "duration_h_err": np.nan,   # see comment above
+        "duration_h_err": float(abs(duration_val / a_val) * a_err * 24.0) if (
+            np.isfinite(a_err) and a_val > 0 and np.isfinite(duration_val)
+        ) else np.nan,
         "ingress_h_val": ingress_val * 24.0,
         "ingress_h_err": np.nan,
         "chisqr": float(result.chisqr),
@@ -533,7 +534,8 @@ def report_fit_vs_known(
     print(f"  Target: {target_id}")
     print(f"  batman C extension: {'YES' if BATMAN_AVAILABLE else 'NO (pure-Python fallback)'}")
     print("=" * 65)
-    print(f"  Depth (ppm)  : fit={depth_rec:.1f}±{depth_err:.1f}  |  known={known['depth_ppm']:.1f}  "
+    depth_err_str = f"{depth_err:.1f}" if not np.isnan(depth_err) else "NaN"
+    print(f"  Depth (ppm)  : fit={depth_rec:.1f}±{depth_err_str}  |  known={known['depth_ppm']:.1f}  "
           f"|  error={depth_err_pct:.1f}%")
     print(f"  Duration (h) : fit={dur_rec:.3f}  |  known={known['duration_hours']:.3f}  "
           f"|  error={dur_err_pct:.1f}%")

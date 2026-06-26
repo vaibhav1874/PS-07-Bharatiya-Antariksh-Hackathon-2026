@@ -131,22 +131,21 @@ def compute_snr(
     if n_in < 3:
         logger.warning("Only %d in-transit cadences — SNR unreliable.", n_in)
 
-    # sigma_oot: per-point robust scatter out of transit.
-    # Part B7: use robust estimator (1.4826 * MAD) rather than std, which
-    # is inflated by any residual outliers in the out-of-transit baseline.
-    oot_median = np.median(oot_flux)
-    mad = np.median(np.abs(oot_flux - oot_median))
-    sigma_oot = float(1.4826 * mad)   # consistent sigma for Gaussian noise
+    local_mask = _transit_mask(time, period, t0, duration * 4.0, width_factor) & ~in_mask
+    if local_mask.sum() >= 20:
+        oot_for_noise = flux[local_mask]
+    else:
+        oot_for_noise = oot_flux
 
-    # Fallback to std if MAD is zero (pathological, e.g., flat synthetic data)
+    oot_median = np.median(oot_for_noise)
+    mad = np.median(np.abs(oot_for_noise - oot_median))
+    sigma_oot = float(1.4826 * mad)
+
     if sigma_oot == 0.0:
-        sigma_oot = float(np.std(oot_flux, ddof=1))
-        logger.debug("MAD=0 for OOT flux; falling back to std.")
+        sigma_oot = float(np.std(oot_for_noise, ddof=1))
 
-    # noise on the transit box depth = sigma_oot / sqrt(N_in)
     noise_on_transit = sigma_oot / np.sqrt(max(n_in, 1))
 
-    # SNR = depth / noise_on_transit  (Kovacs et al. 2002 / Part B7 formula)
     snr = float(depth / noise_on_transit) if noise_on_transit > 0 else np.nan
 
     result = {

@@ -263,10 +263,13 @@ def test_secondary_eclipse(
 
     sec_flux_median = np.median(flux[in_secondary])
     baseline_median = np.median(flux[out_of_transit])
-    baseline_std = np.std(flux[out_of_transit]) / np.sqrt(in_secondary.sum())
+    oot = flux[out_of_transit]
+    _mad = np.median(np.abs(oot - np.median(oot)))
+    _sigma_oot = float(1.4826 * _mad) if _mad > 0 else float(np.std(oot, ddof=1))
+    noise_on_secondary = _sigma_oot / np.sqrt(max(int(in_secondary.sum()), 1))
 
     secondary_depth_ppm = (baseline_median - sec_flux_median) * 1e6
-    secondary_snr = secondary_depth_ppm / max(baseline_std * 1e6, 1e-3)
+    secondary_snr = secondary_depth_ppm / max(noise_on_secondary * 1e6, 1e-3)
 
     # Ratio of secondary to primary depth
     depth_ratio = secondary_depth_ppm / max(primary_depth_ppm, 1.0)

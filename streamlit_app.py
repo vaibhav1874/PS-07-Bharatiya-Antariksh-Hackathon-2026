@@ -269,10 +269,30 @@ if result:
           <div class="sub">{sub}</div>
         </div>""", unsafe_allow_html=True)
 
-    _mc(col1, "Period", f"{result['period_days']:.5f} d", f"±{result.get('period_uncertainty',0):.1e} d")
-    _mc(col2, "Depth",  f"{result['depth_pct']:.4f} %",  f"±{result.get('depth_uncertainty_pct',0):.1e} %")
-    _mc(col3, "Duration", f"{result['duration_hours']:.3f} h", "transit duration")
-    _mc(col4, "SNR", f"{snr:.1f}" if np.isfinite(snr) else "—", f"FAP={fap:.4f}" if np.isfinite(fap) else "FAP not computed")
+    # Helper to format uncertainty sub-label cleanly (no ±nan)
+    def _unc(val, fmt=".1e", unit=""):
+        if val is None: return ""
+        try:
+            v = float(val)
+        except (TypeError, ValueError):
+            return ""
+        if not np.isfinite(v) or v == 0.0:
+            return ""
+        return f"±{v:{fmt}} {unit}".strip()
+
+    pu = result.get("period_uncertainty", None)
+    du = result.get("depth_uncertainty_pct", None)
+    dhu = result.get("duration_uncertainty_hours", None)
+
+    _mc(col1, "Period",   f"{result['period_days']:.5f} d",
+        _unc(pu, ".2e", "d") or "BLS period")
+    _mc(col2, "Depth",    f"{result['depth_pct']:.4f} %",
+        _unc(du, ".2e", "%") or "transit depth")
+    _mc(col3, "Duration", f"{result['duration_hours']:.3f} h",
+        _unc(dhu, ".3f", "h") or "transit duration")
+    _mc(col4, "SNR",
+        f"{snr:.1f}" if np.isfinite(snr) else "—",
+        f"FAP={fap:.4f}" if np.isfinite(fap) else "FAP not computed")
 
     st.markdown("<br>", unsafe_allow_html=True)
 

@@ -30,9 +30,9 @@ RESULTS_DIR = Path(__file__).parent / "results"
 RESULTS_DIR.mkdir(exist_ok=True)
 PLOTS_DIR.mkdir(exist_ok=True)
 
-# Known reference values (period, depth_ppm, duration_h) for recovery comparison
+# Known reference values (period, depth_ppm, duration_hours) for recovery comparison
 KNOWN_PARAMS = {
-    "KIC 11904151": {"period": 0.8375243, "depth_ppm": 152.0, "duration_h": 1.811},
+    "KIC 11904151": {"period": 0.8375243, "depth_ppm": 152.0, "duration_hours": 1.811},
 }
 
 
@@ -148,10 +148,13 @@ def run_pipeline(
     # -------------------------------------------------------------------
     logger.info("[Phase 8] Significance …")
     from significance import run_significance
+    # Pass fitted depth (more accurate than BLS box estimate) for SNR calculation
+    fit_depth_ppm = fit_params.get("depth_ppm_val", None)
     sig = run_significance(
         time=time, flux=detrended, best_signal=best_signal,
         n_fap_trials=n_fap_trials, rng_seed=rng_seed,
         target_id=target_id, save_plot=save_plots, skip_fap=skip_fap,
+        fit_depth_ppm=fit_depth_ppm,
     )
 
     # -------------------------------------------------------------------
@@ -164,35 +167,47 @@ def run_pipeline(
         fit_params=fit_params,
         snr_result=sig,
         vet_results=vet_tests,
+        star_radius_rsun=star_radius_rsun,
     )
 
     # -------------------------------------------------------------------
     # Assemble final JSON-serialisable result (spec §OUTPUT FORMAT)
     # -------------------------------------------------------------------
     period_d   = float(best_signal["period"])
-    depth_ppm  = float(best_signal["depth"]) * 1e6
-    duration_h = float(best_signal["duration"]) * 24.0
+    _bls_depth_ppm = float(best_signal["depth"]) * 1e6
+    _bls_dur_h     = float(best_signal["duration"]) * 24.0
+    depth_ppm  = float(fit_params.get("depth_ppm_val", _bls_depth_ppm))
+    duration_h = float(fit_params.get("duration_h_val", _bls_dur_h))
+    if not np.isfinite(depth_ppm):  depth_ppm  = _bls_depth_ppm
+    if not np.isfinite(duration_h): duration_h = _bls_dur_h
 
     vetting_flags = {
-        "odd_even_consistent":       vet_tests.get("odd_even", {}).get("score", 0) == 1,
+        "odd_even_consistent":        vet_tests.get("odd_even", {}).get("score", 0) == 1,
         "secondary_eclipse_detected": vet_tests.get("secondary", {}).get("score", 0) < 0,
-        "centroid_shift_detected":   vet_tests.get("centroid", {}).get("score", 0) < 0,
+        "centroid_shift_detected":    vet_tests.get("centroid", {}).get("score", 0) < 0,
     }
+
+    _baseline = float(time[-1] - time[0])
+    _n_periods = 9498
+    period_grid_sigma = float(np.clip(
+        period_d ** 2 / max(_baseline * _n_periods, 1e-6),
+        1e-6, period_d / 100.0
+    ))
 
     result: dict = {
         "target_id":                 target_id,
         "mission":                   mission,
         "period_days":               round(period_d, 6),
-        "period_uncertainty":        round(float(fit_params.get("period_err", np.nan)), 6),
+        "period_uncertainty":        round(period_grid_sigma, 7),
         "depth_pct":                 round(depth_ppm / 1e4, 4),   # ppm → %
-        "depth_uncertainty_pct":     round(float(fit_params.get("depth_ppm_err", np.nan)) / 1e4, 4),
+        "depth_uncertainty_pct":     round(float(fit_params.get("depth_ppm_err", np.nan)) / 1e4, 6),
         "duration_hours":            round(duration_h, 4),
         "duration_uncertainty_hours": round(float(fit_params.get("duration_h_err", np.nan)), 4),
         "snr":                       round(float(sig["snr"]), 3),
         "false_alarm_probability":   round(float(sig.get("fap", np.nan)), 5),
         "vetting":                   vetting_flags,
-        "vetting_score":             int(vet_summary.get("total_score", 0)),
-        "vetting_verdict":           str(vet_summary.get("verdict", "unknown")),
+        "vetting_score":             int(vet_summary.get("overall_score", 0)),
+        "vetting_verdict":           str(vet_summary.get("disposition", "unknown")),
         "classification":            clf_result["classification"],
         "classification_confidence": round(clf_result["classification_confidence"], 4),
         "class_probabilities":       {k: round(v, 4) for k, v in clf_result["class_probabilities"].items()},
@@ -204,7 +219,7 @@ def run_pipeline(
         known = KNOWN_PARAMS[target_id]
         err_period = abs(period_d - known["period"]) / known["period"] * 100
         err_depth  = abs(depth_ppm - known["depth_ppm"]) / known["depth_ppm"] * 100
-        err_dur    = abs(duration_h - known["duration_h"]) / known["duration_h"] * 100
+        err_dur    = abs(duration_h - known["duration_hours"]) / known["duration_hours"] * 100
         result["known_value_comparison"] = {
             "published_period_d":    known["period"],
             "recovered_period_d":    round(period_d, 6),
@@ -212,7 +227,7 @@ def run_pipeline(
             "published_depth_ppm":   known["depth_ppm"],
             "recovered_depth_ppm":   round(depth_ppm, 1),
             "depth_error_pct":       round(err_depth, 2),
-            "published_duration_h":  known["duration_h"],
+            "published_duration_h":  known["duration_hours"],
             "recovered_duration_h":  round(duration_h, 4),
             "duration_error_pct":    round(err_dur, 2),
         }
