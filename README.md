@@ -1,3 +1,12 @@
+---
+title: PS-07 Exoplanet Transit Detection
+sdk: docker
+emoji: 🚀
+colorFrom: blue
+colorTo: purple
+pinned: false
+short_description: AI pipeline for exoplanet transit detection
+---
 # PS-07 — Exoplanet Transit Detection Pipeline
 
 > **Bharatiya Antariksh Hackathon 2026 | Problem Statement 07**  
