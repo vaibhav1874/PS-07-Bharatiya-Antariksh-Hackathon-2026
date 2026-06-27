@@ -266,6 +266,10 @@ def run_pipeline(
 
     if return_plot_data:
         result["plot_data"] = {
+            "time": time.tolist() if isinstance(time, np.ndarray) else [],
+            "detrended_flux": detrended.tolist() if isinstance(detrended, np.ndarray) else [],
+            "periods": best_signal.get("periods", []).tolist() if isinstance(best_signal.get("periods"), np.ndarray) else [],
+            "power_spectrum": best_signal.get("power_spectrum", []).tolist() if isinstance(best_signal.get("power_spectrum"), np.ndarray) else [],
             "phase": best_signal.get("phase", []).tolist() if isinstance(best_signal.get("phase"), np.ndarray) else [],
             "flux_folded": best_signal.get("flux_folded", []).tolist() if isinstance(best_signal.get("flux_folded"), np.ndarray) else [],
             "model_phase": fit_params.get("model_phase", []).tolist() if isinstance(fit_params.get("model_phase"), np.ndarray) else [],

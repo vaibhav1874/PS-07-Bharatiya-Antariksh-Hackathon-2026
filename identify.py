@@ -33,7 +33,7 @@ from __future__ import annotations
 import argparse
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import matplotlib
 matplotlib.use("Agg")
@@ -270,7 +270,7 @@ def run_bls(
     flux_err: np.ndarray,
     period_grid: np.ndarray,
     duration_grid: np.ndarray,
-) -> Tuple[object, Dict]:
+) -> Tuple[Any, Dict]:
     """
     Run Box Least Squares on the detrended light curve.
 
@@ -328,6 +328,8 @@ def run_bls(
         "duration": best_dur,
         "depth": best_depth,
         "power": best_power,
+        "periods": bls_result.period.to(u.day).value,
+        "power_spectrum": bls_result.power,
     }
 
     logger.info(
@@ -453,7 +455,7 @@ def phase_fold(
 # ---------------------------------------------------------------------------
 
 def plot_periodogram(
-    bls_result: object,
+    bls_result: Any,
     best_period: float,
     target_id: str,
     save_path: Optional[Path] = None,
